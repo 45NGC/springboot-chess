@@ -1,2 +1,127 @@
 # springboot-chess
-Spring Boot backend for angular-chess
+
+Spring Boot backend for [angular-chess](https://github.com/45NGC/angular-chess), focused first on the online mode REST contract.
+
+## Current Scope
+
+This first version implements the basic online room flow in memory:
+
+- create room
+- join room by code
+- fetch room snapshot
+- submit move
+
+Implemented endpoints:
+
+- `POST /api/online/rooms`
+- `POST /api/online/rooms/{code}/join`
+- `GET /api/online/rooms/{code}`
+- `POST /api/online/rooms/{code}/moves`
+
+## Initial Architecture
+
+The project is intentionally simple for the first iteration:
+
+- `online/controller`: REST endpoints
+- `online/dto`: request/response payloads aligned with the Angular contract
+- `online/model`: shared domain objects and enums
+- `online/service`: room lifecycle and turn rules
+- `online/repository`: in-memory storage with `ConcurrentHashMap`
+- `config/WebConfig`: CORS for local Angular development
+
+The service is already structured so the next steps are straightforward:
+
+- replace the in-memory repository with persistence
+- add a chess move validator on the backend
+- publish live room updates with WebSocket or SSE
+
+## Important v1 Limitation
+
+This version enforces:
+
+- room existence
+- room capacity
+- room status transitions
+- participant ownership
+- turn order
+
+It does **not** validate full chess legality yet. For now it assumes the frontend only sends legal moves, which matches the current incremental goal.
+
+## Run
+
+Requirements:
+
+- Java 21
+
+Then:
+
+```bash
+./mvnw spring-boot:run
+```
+
+By default the backend allows CORS from:
+
+- `http://localhost:4200`
+
+You can change it in `src/main/resources/application.properties`.
+
+## Example Requests
+
+Create room:
+
+```bash
+curl -X POST http://localhost:8080/api/online/rooms \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "settings": {
+      "timeControlSettings": {
+        "white": { "baseMinutes": 5, "incrementSeconds": 0 },
+        "black": { "baseMinutes": 5, "incrementSeconds": 0 }
+      },
+      "hostSidePreference": "random"
+    }
+  }'
+```
+
+Join room:
+
+```bash
+curl -X POST http://localhost:8080/api/online/rooms/ABC123/join \
+  -H 'Content-Type: application/json' \
+  -d '{ "code": "ABC123" }'
+```
+
+Get room:
+
+```bash
+curl http://localhost:8080/api/online/rooms/ABC123
+```
+
+Submit move:
+
+```bash
+curl -X POST http://localhost:8080/api/online/rooms/ABC123/moves \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "playerId": "player_abcd1234",
+    "move": {
+      "from": 12,
+      "to": 28
+    }
+  }'
+```
+
+## Frontend Integration
+
+To connect `angular-chess` later, the cleanest next step is:
+
+1. Replace the current mock `OnlineRoomService` with an HTTP-backed implementation.
+2. Keep the same frontend interfaces already defined in Angular.
+3. Map the service methods directly to these backend calls:
+
+- `createRoom(settings)` -> `POST /api/online/rooms`
+- `joinRoom(code)` -> `POST /api/online/rooms/{code}/join`
+- `getRoom(code)` -> `GET /api/online/rooms/{code}`
+- `submitMove(code, playerId, move)` -> `POST /api/online/rooms/{code}/moves`
+
+For the first integration, polling `getRoom(code)` is enough if you do not want WebSocket yet. After that, the natural upgrade is room updates over WebSocket or SSE so both clients stay synchronized in real time without polling.
