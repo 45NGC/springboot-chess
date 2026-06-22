@@ -44,8 +44,16 @@ This version enforces:
 - room status transitions
 - participant ownership
 - turn order
+- legal chess moves on the backend
+- game end detection from the move history
 
-It does **not** validate full chess legality yet. For now it assumes the frontend only sends legal moves, which matches the current incremental goal.
+The backend now validates moves authoritatively instead of trusting the frontend.
+
+Current limitations:
+
+- no websocket or SSE yet
+- no database persistence yet
+- no reconnection/session hardening yet
 
 ## Run
 
@@ -125,3 +133,7 @@ To connect `angular-chess` later, the cleanest next step is:
 - `submitMove(code, playerId, move)` -> `POST /api/online/rooms/{code}/moves`
 
 For the first integration, polling `getRoom(code)` is enough if you do not want WebSocket yet. After that, the natural upgrade is room updates over WebSocket or SSE so both clients stay synchronized in real time without polling.
+
+Note: invalid chess moves are now rejected with:
+
+- `error: "illegalMove"`

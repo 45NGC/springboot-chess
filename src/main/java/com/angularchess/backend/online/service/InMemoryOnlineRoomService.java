@@ -8,6 +8,11 @@ import java.util.List;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import com.angularchess.backend.chess.model.GameResultType;
+import com.angularchess.backend.chess.model.PieceColor;
+import com.angularchess.backend.chess.rules.GameState;
+import com.angularchess.backend.chess.rules.LegalMoveFinder;
+import com.angularchess.backend.chess.rules.MoveHistoryBuilder;
 import com.angularchess.backend.online.dto.CreateOnlineRoomRequest;
 import com.angularchess.backend.online.dto.CreateOnlineRoomResponse;
 import com.angularchess.backend.online.dto.GetOnlineRoomResponse;
@@ -38,6 +43,7 @@ public class InMemoryOnlineRoomService implements OnlineRoomService {
 	private final OnlineRoomCodeService roomCodeService;
 	private final Clock clock;
 	private final SecureRandom random = new SecureRandom();
+	private final LegalMoveFinder legalMoveFinder = new LegalMoveFinder();
 
 	@Autowired
 	public InMemoryOnlineRoomService(
@@ -139,30 +145,35 @@ public class InMemoryOnlineRoomService implements OnlineRoomService {
 		}
 
 		if (room.whitePlayer() == null || room.blackPlayer() == null) {
-			return SubmitOnlineMoveResponse.failure(SubmitOnlineMoveError.NOT_YOUR_TURN);
+			return SubmitOnlineMoveResponse.failure(SubmitOnlineMoveError.ILLEGAL_MOVE);
 		}
 
-		OnlineRoomSide currentTurn = resolveTurn(room.moves());
+		GameState gameState = MoveHistoryBuilder.buildGameStateFromMoves(extractMoves(room.moves()));
+		OnlineRoomSide currentTurn = toOnlineRoomSide(gameState.getTurn());
 		if (currentTurn != player.side()) {
 			return SubmitOnlineMoveResponse.failure(SubmitOnlineMoveError.NOT_YOUR_TURN);
+		}
+		Move legalMove = resolveLegalMove(gameState, request.move());
+		if (legalMove == null) {
+			return SubmitOnlineMoveResponse.failure(SubmitOnlineMoveError.ILLEGAL_MOVE);
 		}
 
 		long now = clock.millis();
 		List<OnlineMoveRecord> updatedMoves = new ArrayList<>(room.moves());
-		updatedMoves.add(new OnlineMoveRecord(copyMove(request.move()), player.side(), now));
+		updatedMoves.add(new OnlineMoveRecord(copyMove(legalMove), player.side(), now));
 
-		// v1 trusts the frontend to only submit legal chess moves.
-		// The backend still owns participation, turn order and room lifecycle rules.
+		GameState nextState = MoveHistoryBuilder.buildGameStateFromMoves(extractMoves(updatedMoves));
+		boolean finished = nextState.getResult().type() != GameResultType.ONGOING;
 		OnlineRoom updatedRoom = new OnlineRoom(
 			room.code(),
-			OnlineRoomStatus.PLAYING,
+			finished ? OnlineRoomStatus.FINISHED : OnlineRoomStatus.PLAYING,
 			room.whitePlayer(),
 			room.blackPlayer(),
 			room.timeControlSettings(),
 			List.copyOf(updatedMoves),
 			room.createdAt(),
 			room.startedAt() == null ? now : room.startedAt(),
-			room.finishedAt()
+			finished ? now : null
 		);
 
 		roomRepository.save(updatedRoom);
@@ -218,8 +229,30 @@ public class InMemoryOnlineRoomService implements OnlineRoomService {
 		return null;
 	}
 
-	private OnlineRoomSide resolveTurn(List<OnlineMoveRecord> moves) {
-		return moves.size() % 2 == 0 ? OnlineRoomSide.WHITE : OnlineRoomSide.BLACK;
+	private Move resolveLegalMove(GameState gameState, Move move) {
+		List<Move> legalMoves = legalMoveFinder.getLegalMoves(gameState.getBoard(), move.from());
+		for (Move legalMove : legalMoves) {
+			if (matchesClientMove(legalMove, move)) {
+				return legalMove;
+			}
+		}
+		return null;
+	}
+
+	private boolean matchesClientMove(Move legalMove, Move clientMove) {
+		return legalMove.from() == clientMove.from()
+			&& legalMove.to() == clientMove.to()
+			&& legalMove.promotion() == clientMove.promotion();
+	}
+
+	private List<Move> extractMoves(List<OnlineMoveRecord> moveRecords) {
+		return moveRecords.stream()
+			.map(OnlineMoveRecord::move)
+			.toList();
+	}
+
+	private OnlineRoomSide toOnlineRoomSide(PieceColor pieceColor) {
+		return pieceColor == PieceColor.WHITE ? OnlineRoomSide.WHITE : OnlineRoomSide.BLACK;
 	}
 
 	private Move copyMove(Move move) {

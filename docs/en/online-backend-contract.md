@@ -126,6 +126,7 @@ Possible errors:
 
 - `notFound`
 - `notParticipant`
+- `illegalMove`
 - `notYourTurn`
 - `finished`
 
@@ -135,10 +136,11 @@ Possible errors:
 - The host can choose `white | black | random`
 - A room becomes `ready` when a second player joins
 - A room becomes `playing` on the first accepted move
+- A room becomes `finished` when the backend detects checkmate, stalemate or a supported draw rule
 - Only the player whose turn it is can move
 
-## Current Backend Limitation
+## Current Backend Status
 
-This first Spring Boot version enforces participants, capacity, turn order and room lifecycle.
+This Spring Boot version enforces participants, capacity, turn order, legal chess moves and room lifecycle.
 
-It does not validate full chess legality yet and currently trusts the frontend to send legal moves.
+It already validates legal moves on the backend and computes terminal positions from the accepted move history.

@@ -6,6 +6,7 @@ import com.fasterxml.jackson.annotation.JsonValue;
 public enum SubmitOnlineMoveError {
 	NOT_FOUND("notFound"),
 	NOT_PARTICIPANT("notParticipant"),
+	ILLEGAL_MOVE("illegalMove"),
 	NOT_YOUR_TURN("notYourTurn"),
 	FINISHED("finished");
 

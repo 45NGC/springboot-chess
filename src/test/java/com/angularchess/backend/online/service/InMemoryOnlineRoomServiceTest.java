@@ -103,6 +103,23 @@ class InMemoryOnlineRoomServiceTest {
 	}
 
 	@Test
+	void submitMoveRejectsAnIllegalMove() {
+		CreateOnlineRoomResponse createdRoom = service.createRoom(createRoomRequest(HostSidePreference.WHITE));
+		service.joinRoom(createdRoom.room().code());
+
+		SubmitOnlineMoveResponse response = service.submitMove(
+			createdRoom.room().code(),
+			new SubmitOnlineMoveRequest(
+				createdRoom.session().playerId(),
+				new Move(12, 36, null, null, null, null)
+			)
+		);
+
+		assertFalse(response.ok());
+		assertEquals(SubmitOnlineMoveError.ILLEGAL_MOVE, response.error());
+	}
+
+	@Test
 	void submitMoveAcceptsTheFirstMoveAndMarksTheRoomAsPlaying() {
 		CreateOnlineRoomResponse createdRoom = service.createRoom(createRoomRequest(HostSidePreference.WHITE));
 		service.joinRoom(createdRoom.room().code());
@@ -120,6 +137,35 @@ class InMemoryOnlineRoomServiceTest {
 		assertEquals(NOW, response.room().startedAt());
 		assertEquals(1, response.room().moves().size());
 		assertEquals(OnlineRoomSide.WHITE, response.room().moves().getFirst().playedBy());
+	}
+
+	@Test
+	void submitMoveMarksTheRoomFinishedOnCheckmate() {
+		CreateOnlineRoomResponse createdRoom = service.createRoom(createRoomRequest(HostSidePreference.WHITE));
+		JoinOnlineRoomResponse joinedRoom = service.joinRoom(createdRoom.room().code());
+
+		assertTrue(service.submitMove(
+			createdRoom.room().code(),
+			new SubmitOnlineMoveRequest(createdRoom.session().playerId(), new Move(13, 21, null, null, null, null))
+		).ok());
+		assertTrue(service.submitMove(
+			createdRoom.room().code(),
+			new SubmitOnlineMoveRequest(joinedRoom.session().playerId(), new Move(52, 36, null, null, null, true))
+		).ok());
+		assertTrue(service.submitMove(
+			createdRoom.room().code(),
+			new SubmitOnlineMoveRequest(createdRoom.session().playerId(), new Move(14, 30, null, null, null, true))
+		).ok());
+
+		SubmitOnlineMoveResponse mate = service.submitMove(
+			createdRoom.room().code(),
+			new SubmitOnlineMoveRequest(joinedRoom.session().playerId(), new Move(59, 31, null, null, null, null))
+		);
+
+		assertTrue(mate.ok());
+		assertEquals(OnlineRoomStatus.FINISHED, mate.room().status());
+		assertEquals(NOW, mate.room().finishedAt());
+		assertEquals(4, mate.room().moves().size());
 	}
 
 	private CreateOnlineRoomRequest createRoomRequest(HostSidePreference hostSidePreference) {

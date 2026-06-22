@@ -126,6 +126,7 @@ Errores posibles:
 
 - `notFound`
 - `notParticipant`
+- `illegalMove`
 - `notYourTurn`
 - `finished`
 
@@ -135,10 +136,11 @@ Errores posibles:
 - El host puede elegir `white | black | random`
 - La sala pasa a `ready` cuando entra el segundo jugador
 - La sala pasa a `playing` en el primer movimiento aceptado
+- La sala pasa a `finished` cuando el backend detecta jaque mate, ahogado o unas tablas soportadas
 - Solo puede mover el jugador al que le toca
 
-## Limitacion Actual Del Backend
+## Estado Actual Del Backend
 
-Esta primera version de Spring Boot aplica participantes, capacidad, turnos y ciclo de vida de la sala.
+Esta version de Spring Boot aplica participantes, capacidad, turnos, legalidad real de movimientos y ciclo de vida de la sala.
 
-Todavia no valida toda la legalidad ajedrecistica y por ahora confia en que el frontend envie movimientos legales.
+Ya valida movimientos legales en el backend y calcula posiciones terminales a partir del historial de jugadas aceptadas.
