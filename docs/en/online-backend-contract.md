@@ -139,8 +139,32 @@ Possible errors:
 - A room becomes `finished` when the backend detects checkmate, stalemate or a supported draw rule
 - Only the player whose turn it is can move
 
+## WebSocket Updates
+
+STOMP endpoint:
+
+- `/ws`
+
+Room subscription destination:
+
+- `/topic/online/rooms/{code}`
+
+Published payload:
+
+```json
+{
+  "room": {}
+}
+```
+
+The backend publishes the full room snapshot after:
+
+- room creation
+- successful room join
+- each accepted move
+
 ## Current Backend Status
 
 This Spring Boot version enforces participants, capacity, turn order, legal chess moves and room lifecycle.
 
-It already validates legal moves on the backend and computes terminal positions from the accepted move history.
+It already validates legal moves on the backend, computes terminal positions from the accepted move history, and broadcasts updated room snapshots over WebSocket.

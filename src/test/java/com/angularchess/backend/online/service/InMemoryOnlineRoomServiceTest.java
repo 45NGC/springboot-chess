@@ -21,25 +21,30 @@ import com.angularchess.backend.online.dto.SubmitOnlineMoveResponse;
 import com.angularchess.backend.online.model.HostSidePreference;
 import com.angularchess.backend.online.model.Move;
 import com.angularchess.backend.online.model.OnlineGameSettings;
+import com.angularchess.backend.online.model.OnlineRoom;
 import com.angularchess.backend.online.model.OnlineRoomSide;
 import com.angularchess.backend.online.model.OnlineRoomStatus;
 import com.angularchess.backend.online.model.SideTimeControl;
 import com.angularchess.backend.online.model.SubmitOnlineMoveError;
 import com.angularchess.backend.online.model.TimeControl;
 import com.angularchess.backend.online.repository.InMemoryOnlineRoomRepository;
+import com.angularchess.backend.online.websocket.OnlineRoomTopicPublisher;
 
 class InMemoryOnlineRoomServiceTest {
 
 	private static final long NOW = Instant.parse("2026-06-16T20:00:00Z").toEpochMilli();
 
 	private InMemoryOnlineRoomService service;
+	private RecordingRoomTopicPublisher roomTopicPublisher;
 
 	@BeforeEach
 	void setUp() {
 		Clock fixedClock = Clock.fixed(Instant.ofEpochMilli(NOW), ZoneOffset.UTC);
+		roomTopicPublisher = new RecordingRoomTopicPublisher();
 		service = new InMemoryOnlineRoomService(
 			new InMemoryOnlineRoomRepository(),
 			new OnlineRoomCodeService(),
+			roomTopicPublisher,
 			fixedClock
 		);
 	}
@@ -56,6 +61,8 @@ class InMemoryOnlineRoomServiceTest {
 		assertEquals(response.room().code(), response.session().roomCode());
 		assertEquals(response.room().whitePlayer().id(), response.session().playerId());
 		assertEquals(OnlineRoomSide.WHITE, response.session().playerSide());
+		assertEquals(1, roomTopicPublisher.publishCount);
+		assertEquals(response.room(), roomTopicPublisher.lastPublishedRoom);
 	}
 
 	@Test
@@ -69,6 +76,8 @@ class InMemoryOnlineRoomServiceTest {
 		assertNotNull(response.room().whitePlayer());
 		assertNotNull(response.room().blackPlayer());
 		assertEquals(OnlineRoomSide.WHITE, response.session().playerSide());
+		assertEquals(2, roomTopicPublisher.publishCount);
+		assertEquals(response.room(), roomTopicPublisher.lastPublishedRoom);
 	}
 
 	@Test
@@ -137,6 +146,27 @@ class InMemoryOnlineRoomServiceTest {
 		assertEquals(NOW, response.room().startedAt());
 		assertEquals(1, response.room().moves().size());
 		assertEquals(OnlineRoomSide.WHITE, response.room().moves().getFirst().playedBy());
+		assertEquals(3, roomTopicPublisher.publishCount);
+		assertEquals(response.room(), roomTopicPublisher.lastPublishedRoom);
+	}
+
+	@Test
+	void submitMoveFailureDoesNotPublishAnyNewSnapshot() {
+		CreateOnlineRoomResponse createdRoom = service.createRoom(createRoomRequest(HostSidePreference.WHITE));
+		service.joinRoom(createdRoom.room().code());
+
+		int publishCountBeforeFailure = roomTopicPublisher.publishCount;
+		SubmitOnlineMoveResponse response = service.submitMove(
+			createdRoom.room().code(),
+			new SubmitOnlineMoveRequest(
+				createdRoom.session().playerId(),
+				new Move(12, 36, null, null, null, null)
+			)
+		);
+
+		assertFalse(response.ok());
+		assertEquals(SubmitOnlineMoveError.ILLEGAL_MOVE, response.error());
+		assertEquals(publishCountBeforeFailure, roomTopicPublisher.publishCount);
 	}
 
 	@Test
@@ -178,5 +208,17 @@ class InMemoryOnlineRoomServiceTest {
 				hostSidePreference
 			)
 		);
+	}
+
+	private static final class RecordingRoomTopicPublisher implements OnlineRoomTopicPublisher {
+
+		private int publishCount;
+		private OnlineRoom lastPublishedRoom;
+
+		@Override
+		public void publishRoomUpdate(OnlineRoom room) {
+			publishCount++;
+			lastPublishedRoom = room;
+		}
 	}
 }

@@ -32,8 +32,7 @@ The project is intentionally simple for the first iteration:
 The service is already structured so the next steps are straightforward:
 
 - replace the in-memory repository with persistence
-- add a chess move validator on the backend
-- publish live room updates with WebSocket or SSE
+- add clocks, reconnection and session hardening
 
 ## Important v1 Limitation
 
@@ -51,7 +50,6 @@ The backend now validates moves authoritatively instead of trusting the frontend
 
 Current limitations:
 
-- no websocket or SSE yet
 - no database persistence yet
 - no reconnection/session hardening yet
 
@@ -72,6 +70,30 @@ By default the backend allows CORS from:
 - `http://localhost:4200`
 
 You can change it in `src/main/resources/application.properties`.
+
+## WebSocket
+
+The backend exposes a STOMP WebSocket endpoint at:
+
+- `/ws`
+
+Clients can subscribe to room updates at:
+
+- `/topic/online/rooms/{code}`
+
+Published payload:
+
+```json
+{
+  "room": {}
+}
+```
+
+The backend publishes a new room snapshot when:
+
+- a room is created
+- a second player joins
+- a move is accepted
 
 ## Example Requests
 
@@ -132,7 +154,7 @@ To connect `angular-chess` later, the cleanest next step is:
 - `getRoom(code)` -> `GET /api/online/rooms/{code}`
 - `submitMove(code, playerId, move)` -> `POST /api/online/rooms/{code}/moves`
 
-For the first integration, polling `getRoom(code)` is enough if you do not want WebSocket yet. After that, the natural upgrade is room updates over WebSocket or SSE so both clients stay synchronized in real time without polling.
+For realtime sync, connect to `/ws` and subscribe to `/topic/online/rooms/{code}` after creating or joining the room. Each event contains the full updated room snapshot, so the frontend can simply replace its local room state.
 
 Note: invalid chess moves are now rejected with:
 

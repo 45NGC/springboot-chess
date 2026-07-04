@@ -139,8 +139,32 @@ Errores posibles:
 - La sala pasa a `finished` cuando el backend detecta jaque mate, ahogado o unas tablas soportadas
 - Solo puede mover el jugador al que le toca
 
+## Actualizaciones Por WebSocket
+
+Endpoint STOMP:
+
+- `/ws`
+
+Destino de suscripcion por sala:
+
+- `/topic/online/rooms/{code}`
+
+Payload publicado:
+
+```json
+{
+  "room": {}
+}
+```
+
+El backend publica el snapshot completo de la sala tras:
+
+- crear la sala
+- unirse correctamente a la sala
+- cada movimiento aceptado
+
 ## Estado Actual Del Backend
 
 Esta version de Spring Boot aplica participantes, capacidad, turnos, legalidad real de movimientos y ciclo de vida de la sala.
 
-Ya valida movimientos legales en el backend y calcula posiciones terminales a partir del historial de jugadas aceptadas.
+Ya valida movimientos legales en el backend, calcula posiciones terminales a partir del historial de jugadas aceptadas y emite snapshots actualizados de la sala por WebSocket.

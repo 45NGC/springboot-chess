@@ -31,6 +31,7 @@ import com.angularchess.backend.online.model.OnlineRoomSide;
 import com.angularchess.backend.online.model.OnlineRoomStatus;
 import com.angularchess.backend.online.model.SubmitOnlineMoveError;
 import com.angularchess.backend.online.repository.OnlineRoomRepository;
+import com.angularchess.backend.online.websocket.OnlineRoomTopicPublisher;
 
 @Service
 public class InMemoryOnlineRoomService implements OnlineRoomService {
@@ -41,6 +42,7 @@ public class InMemoryOnlineRoomService implements OnlineRoomService {
 
 	private final OnlineRoomRepository roomRepository;
 	private final OnlineRoomCodeService roomCodeService;
+	private final OnlineRoomTopicPublisher roomTopicPublisher;
 	private final Clock clock;
 	private final SecureRandom random = new SecureRandom();
 	private final LegalMoveFinder legalMoveFinder = new LegalMoveFinder();
@@ -48,18 +50,21 @@ public class InMemoryOnlineRoomService implements OnlineRoomService {
 	@Autowired
 	public InMemoryOnlineRoomService(
 		OnlineRoomRepository roomRepository,
-		OnlineRoomCodeService roomCodeService
+		OnlineRoomCodeService roomCodeService,
+		OnlineRoomTopicPublisher roomTopicPublisher
 	) {
-		this(roomRepository, roomCodeService, Clock.systemUTC());
+		this(roomRepository, roomCodeService, roomTopicPublisher, Clock.systemUTC());
 	}
 
 	InMemoryOnlineRoomService(
 		OnlineRoomRepository roomRepository,
 		OnlineRoomCodeService roomCodeService,
+		OnlineRoomTopicPublisher roomTopicPublisher,
 		Clock clock
 	) {
 		this.roomRepository = roomRepository;
 		this.roomCodeService = roomCodeService;
+		this.roomTopicPublisher = roomTopicPublisher;
 		this.clock = clock;
 	}
 
@@ -83,6 +88,7 @@ public class InMemoryOnlineRoomService implements OnlineRoomService {
 		OnlineRoomSession session = new OnlineRoomSession(roomCode, player.id(), playerSide);
 
 		roomRepository.save(room);
+		roomTopicPublisher.publishRoomUpdate(room);
 		return new CreateOnlineRoomResponse(room, session);
 	}
 
@@ -118,6 +124,7 @@ public class InMemoryOnlineRoomService implements OnlineRoomService {
 		OnlineRoomSession session = new OnlineRoomSession(code, player.id(), playerSide);
 
 		roomRepository.save(updatedRoom);
+		roomTopicPublisher.publishRoomUpdate(updatedRoom);
 		return JoinOnlineRoomResponse.success(updatedRoom, session);
 	}
 
@@ -177,6 +184,7 @@ public class InMemoryOnlineRoomService implements OnlineRoomService {
 		);
 
 		roomRepository.save(updatedRoom);
+		roomTopicPublisher.publishRoomUpdate(updatedRoom);
 		return SubmitOnlineMoveResponse.success(updatedRoom);
 	}
 
