@@ -29,6 +29,7 @@ import com.angularchess.backend.online.model.OnlineRoomPlayer;
 import com.angularchess.backend.online.model.OnlineRoomSession;
 import com.angularchess.backend.online.model.OnlineRoomSide;
 import com.angularchess.backend.online.model.OnlineRoomStatus;
+import com.angularchess.backend.online.model.SideTimeControl;
 import com.angularchess.backend.online.model.SubmitOnlineMoveError;
 import com.angularchess.backend.online.repository.OnlineRoomRepository;
 import com.angularchess.backend.online.websocket.OnlineRoomTopicPublisher;
@@ -80,6 +81,11 @@ public class InMemoryOnlineRoomService implements OnlineRoomService {
 			playerSide == OnlineRoomSide.WHITE ? player : null,
 			playerSide == OnlineRoomSide.BLACK ? player : null,
 			request.settings().timeControlSettings(),
+			initialTimeMs(request.settings().timeControlSettings().white()),
+			initialTimeMs(request.settings().timeControlSettings().black()),
+			null,
+			null,
+			null,
 			List.of(),
 			now,
 			null,
@@ -116,6 +122,11 @@ public class InMemoryOnlineRoomService implements OnlineRoomService {
 			playerSide == OnlineRoomSide.WHITE ? player : room.whitePlayer(),
 			playerSide == OnlineRoomSide.BLACK ? player : room.blackPlayer(),
 			room.timeControlSettings(),
+			room.whiteTimeMs(),
+			room.blackTimeMs(),
+			room.activeClockColor(),
+			room.clockUpdatedAt(),
+			room.timeoutWinner(),
 			room.moves(),
 			room.createdAt(),
 			room.startedAt(),
@@ -129,18 +140,34 @@ public class InMemoryOnlineRoomService implements OnlineRoomService {
 	}
 
 	@Override
-	public GetOnlineRoomResponse getRoom(String rawCode) {
+	public synchronized GetOnlineRoomResponse getRoom(String rawCode) {
 		String code = roomCodeService.normalizeCode(rawCode);
-		return new GetOnlineRoomResponse(roomRepository.findByCode(code).orElse(null));
+		OnlineRoom room = roomRepository.findByCode(code).orElse(null);
+		if (room == null) {
+			return new GetOnlineRoomResponse(null);
+		}
+
+		OnlineRoom materializedRoom = materializeRoomState(room, clock.millis());
+		if (!materializedRoom.equals(room)) {
+			roomRepository.save(materializedRoom);
+			roomTopicPublisher.publishRoomUpdate(materializedRoom);
+		}
+		return new GetOnlineRoomResponse(materializedRoom);
 	}
 
 	@Override
 	public synchronized SubmitOnlineMoveResponse submitMove(String rawCode, SubmitOnlineMoveRequest request) {
 		String code = roomCodeService.normalizeCode(rawCode);
-		OnlineRoom room = roomRepository.findByCode(code)
+		OnlineRoom storedRoom = roomRepository.findByCode(code)
 			.orElse(null);
-		if (room == null) {
+		if (storedRoom == null) {
 			return SubmitOnlineMoveResponse.failure(SubmitOnlineMoveError.NOT_FOUND);
+		}
+		long now = clock.millis();
+		OnlineRoom room = materializeRoomState(storedRoom, now);
+		if (!room.equals(storedRoom)) {
+			roomRepository.save(room);
+			roomTopicPublisher.publishRoomUpdate(room);
 		}
 		if (room.status() == OnlineRoomStatus.FINISHED) {
 			return SubmitOnlineMoveResponse.failure(SubmitOnlineMoveError.FINISHED);
@@ -165,22 +192,27 @@ public class InMemoryOnlineRoomService implements OnlineRoomService {
 			return SubmitOnlineMoveResponse.failure(SubmitOnlineMoveError.ILLEGAL_MOVE);
 		}
 
-		long now = clock.millis();
 		List<OnlineMoveRecord> updatedMoves = new ArrayList<>(room.moves());
 		updatedMoves.add(new OnlineMoveRecord(copyMove(legalMove), player.side(), now));
 
 		GameState nextState = MoveHistoryBuilder.buildGameStateFromMoves(extractMoves(updatedMoves));
 		boolean finished = nextState.getResult().type() != GameResultType.ONGOING;
+		ClockState nextClockState = advanceClockAfterAcceptedMove(room, player.side(), now, finished);
 		OnlineRoom updatedRoom = new OnlineRoom(
 			room.code(),
-			finished ? OnlineRoomStatus.FINISHED : OnlineRoomStatus.PLAYING,
+			nextClockState.timeoutWinner() != null || finished ? OnlineRoomStatus.FINISHED : OnlineRoomStatus.PLAYING,
 			room.whitePlayer(),
 			room.blackPlayer(),
 			room.timeControlSettings(),
+			nextClockState.whiteTimeMs(),
+			nextClockState.blackTimeMs(),
+			nextClockState.activeClockColor(),
+			nextClockState.clockUpdatedAt(),
+			nextClockState.timeoutWinner(),
 			List.copyOf(updatedMoves),
 			room.createdAt(),
 			room.startedAt() == null ? now : room.startedAt(),
-			finished ? now : null
+			nextClockState.timeoutWinner() != null || finished ? now : null
 		);
 
 		roomRepository.save(updatedRoom);
@@ -281,5 +313,109 @@ public class InMemoryOnlineRoomService implements OnlineRoomService {
 			builder.append(PLAYER_ID_ALPHABET.charAt(randomIndex));
 		}
 		return builder.toString();
+	}
+
+	private OnlineRoom materializeRoomState(OnlineRoom room, long now) {
+		if (room.activeClockColor() == null || room.clockUpdatedAt() == null || room.status() == OnlineRoomStatus.FINISHED) {
+			return room;
+		}
+		if (isUnlimited(room, room.activeClockColor())) {
+			return room;
+		}
+
+		long elapsed = Math.max(0L, now - room.clockUpdatedAt());
+		if (elapsed == 0L) {
+			return room;
+		}
+
+		long whiteTimeMs = room.whiteTimeMs();
+		long blackTimeMs = room.blackTimeMs();
+		OnlineRoomSide activeClockColor = room.activeClockColor();
+		OnlineRoomSide timeoutWinner = null;
+
+		if (activeClockColor == OnlineRoomSide.WHITE) {
+			whiteTimeMs = Math.max(0L, whiteTimeMs - elapsed);
+			if (whiteTimeMs == 0L) {
+				timeoutWinner = OnlineRoomSide.BLACK;
+			}
+		} else {
+			blackTimeMs = Math.max(0L, blackTimeMs - elapsed);
+			if (blackTimeMs == 0L) {
+				timeoutWinner = OnlineRoomSide.WHITE;
+			}
+		}
+
+		return new OnlineRoom(
+			room.code(),
+			timeoutWinner != null ? OnlineRoomStatus.FINISHED : room.status(),
+			room.whitePlayer(),
+			room.blackPlayer(),
+			room.timeControlSettings(),
+			whiteTimeMs,
+			blackTimeMs,
+			timeoutWinner != null ? null : activeClockColor,
+			timeoutWinner != null ? null : now,
+			timeoutWinner,
+			room.moves(),
+			room.createdAt(),
+			room.startedAt(),
+			timeoutWinner != null ? Long.valueOf(now) : room.finishedAt()
+		);
+	}
+
+	private ClockState advanceClockAfterAcceptedMove(OnlineRoom room, OnlineRoomSide mover, long now, boolean finished) {
+		if (!isClockEnabled(room)) {
+			return new ClockState(room.whiteTimeMs(), room.blackTimeMs(), null, null, null);
+		}
+
+		long whiteTimeMs = room.whiteTimeMs();
+		long blackTimeMs = room.blackTimeMs();
+
+		if (mover == OnlineRoomSide.WHITE && room.timeControlSettings().white().baseMinutes() > 0) {
+			whiteTimeMs += incrementMs(room.timeControlSettings().white());
+		}
+		if (mover == OnlineRoomSide.BLACK && room.timeControlSettings().black().baseMinutes() > 0) {
+			blackTimeMs += incrementMs(room.timeControlSettings().black());
+		}
+
+		if (finished) {
+			return new ClockState(whiteTimeMs, blackTimeMs, null, null, null);
+		}
+
+		return new ClockState(
+			whiteTimeMs,
+			blackTimeMs,
+			mover == OnlineRoomSide.WHITE ? OnlineRoomSide.BLACK : OnlineRoomSide.WHITE,
+			now,
+			null
+		);
+	}
+
+	private boolean isClockEnabled(OnlineRoom room) {
+		return room.timeControlSettings().white().baseMinutes() > 0
+			|| room.timeControlSettings().black().baseMinutes() > 0;
+	}
+
+	private boolean isUnlimited(OnlineRoom room, OnlineRoomSide side) {
+		return side == OnlineRoomSide.WHITE
+			? room.timeControlSettings().white().baseMinutes() <= 0
+			: room.timeControlSettings().black().baseMinutes() <= 0;
+	}
+
+	private long initialTimeMs(SideTimeControl sideTimeControl) {
+		return Math.max(0L, sideTimeControl.baseMinutes()) * 60_000L;
+	}
+
+	private long incrementMs(SideTimeControl sideTimeControl) {
+		return Math.max(0L, sideTimeControl.incrementSeconds()) * 1_000L;
+	}
+
+	private record ClockState(
+		long whiteTimeMs,
+		long blackTimeMs,
+		OnlineRoomSide activeClockColor,
+		Long clockUpdatedAt,
+		OnlineRoomSide timeoutWinner
+	) {
 	}
 }
