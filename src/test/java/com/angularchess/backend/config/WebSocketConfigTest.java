@@ -26,6 +26,6 @@ class WebSocketConfigTest {
 
 		assertNotNull(handlerMapping);
 		assertNotNull(brokerHandler);
-		assertTrue(handlerMapping.getHandlerMap().containsKey("/ws"));
+		assertTrue(handlerMapping.getHandlerMap().containsKey(WebSocketDestinations.STOMP_ENDPOINT));
 	}
 }

@@ -52,7 +52,7 @@ class StompOnlineRoomTopicPublisherTest {
 
 		SimpMessageHeaderAccessor headers = SimpMessageHeaderAccessor.wrap(messageChannel.lastMessage);
 		assertEquals(SimpMessageType.MESSAGE, headers.getMessageType());
-		assertEquals("/topic/online/rooms/ABC123", headers.getDestination());
+		assertEquals(OnlineRoomTopics.roomUpdates("ABC123"), headers.getDestination());
 
 		Object payload = messageChannel.lastMessage.getPayload();
 		assertInstanceOf(OnlineRoomUpdateEvent.class, payload);
