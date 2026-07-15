@@ -40,6 +40,8 @@ class StompOnlineRoomTopicPublisherTest {
 			null,
 			null,
 			null,
+			false,
+			false,
 			List.of(),
 			1L,
 			null,

@@ -18,6 +18,8 @@ public record OnlineRoom(
 	@Valid OnlineRoomSide activeClockColor,
 	@PositiveOrZero Long clockUpdatedAt,
 	@Valid OnlineRoomSide timeoutWinner,
+	boolean whiteRequestedRematch,
+	boolean blackRequestedRematch,
 	@NotNull List<@Valid OnlineMoveRecord> moves,
 	@PositiveOrZero long createdAt,
 	Long startedAt,

@@ -61,6 +61,8 @@ class InMemoryOnlineRoomServiceTest {
 		assertEquals(NOW, response.room().createdAt());
 		assertEquals(300_000L, response.room().whiteTimeMs());
 		assertEquals(300_000L, response.room().blackTimeMs());
+		assertFalse(response.room().whiteRequestedRematch());
+		assertFalse(response.room().blackRequestedRematch());
 		assertEquals(response.room().code(), response.session().roomCode());
 		assertEquals(response.room().whitePlayer().id(), response.session().playerId());
 		assertEquals(OnlineRoomSide.WHITE, response.session().playerSide());
@@ -78,6 +80,8 @@ class InMemoryOnlineRoomServiceTest {
 		assertEquals(OnlineRoomStatus.READY, response.room().status());
 		assertNotNull(response.room().whitePlayer());
 		assertNotNull(response.room().blackPlayer());
+		assertFalse(response.room().whiteRequestedRematch());
+		assertFalse(response.room().blackRequestedRematch());
 		assertEquals(OnlineRoomSide.WHITE, response.session().playerSide());
 		assertEquals(2, roomTopicPublisher.publishCount);
 		assertEquals(response.room(), roomTopicPublisher.lastPublishedRoom);
