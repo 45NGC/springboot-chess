@@ -4,6 +4,8 @@ import com.angularchess.backend.online.dto.CreateOnlineRoomRequest;
 import com.angularchess.backend.online.dto.CreateOnlineRoomResponse;
 import com.angularchess.backend.online.dto.GetOnlineRoomResponse;
 import com.angularchess.backend.online.dto.JoinOnlineRoomResponse;
+import com.angularchess.backend.online.dto.RequestOnlineRematchRequest;
+import com.angularchess.backend.online.dto.RequestOnlineRematchResponse;
 import com.angularchess.backend.online.dto.SubmitOnlineMoveRequest;
 import com.angularchess.backend.online.dto.SubmitOnlineMoveResponse;
 
@@ -16,4 +18,6 @@ public interface OnlineRoomService {
 	GetOnlineRoomResponse getRoom(String rawCode);
 
 	SubmitOnlineMoveResponse submitMove(String rawCode, SubmitOnlineMoveRequest request);
+
+	RequestOnlineRematchResponse requestRematch(String rawCode, RequestOnlineRematchRequest request);
 }

@@ -19,6 +19,8 @@ import com.angularchess.backend.online.dto.CreateOnlineRoomRequest;
 import com.angularchess.backend.online.dto.CreateOnlineRoomResponse;
 import com.angularchess.backend.online.dto.GetOnlineRoomResponse;
 import com.angularchess.backend.online.dto.JoinOnlineRoomResponse;
+import com.angularchess.backend.online.dto.RequestOnlineRematchRequest;
+import com.angularchess.backend.online.dto.RequestOnlineRematchResponse;
 import com.angularchess.backend.online.dto.SubmitOnlineMoveRequest;
 import com.angularchess.backend.online.dto.SubmitOnlineMoveResponse;
 import com.angularchess.backend.online.model.JoinOnlineRoomError;
@@ -30,6 +32,7 @@ import com.angularchess.backend.online.model.OnlineRoomPlayer;
 import com.angularchess.backend.online.model.OnlineRoomSession;
 import com.angularchess.backend.online.model.OnlineRoomSide;
 import com.angularchess.backend.online.model.OnlineRoomStatus;
+import com.angularchess.backend.online.model.RequestOnlineRematchError;
 import com.angularchess.backend.online.model.SideTimeControl;
 import com.angularchess.backend.online.model.SubmitOnlineMoveError;
 import com.angularchess.backend.online.model.TimeControl;
@@ -169,6 +172,40 @@ class OnlineRoomControllerTest {
 			.andExpect(jsonPath("$.room").doesNotExist());
 	}
 
+	@Test
+	void requestRematchReturnsUpdatedRoomOnSuccess() throws Exception {
+		onlineRoomService.requestOnlineRematchResponse = RequestOnlineRematchResponse.success(sampleFinishedRoom(true, false));
+
+		mockMvc.perform(post("/api/online/rooms/ABC123/rematch")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{
+					  "playerId": "player_host"
+					}
+					"""))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.ok").value(true))
+			.andExpect(jsonPath("$.room.whiteRequestedRematch").value(true))
+			.andExpect(jsonPath("$.room.blackRequestedRematch").value(false));
+	}
+
+	@Test
+	void requestRematchReturnsDomainErrorPayload() throws Exception {
+		onlineRoomService.requestOnlineRematchResponse = RequestOnlineRematchResponse.failure(RequestOnlineRematchError.NOT_FINISHED);
+
+		mockMvc.perform(post("/api/online/rooms/ABC123/rematch")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{
+					  "playerId": "player_host"
+					}
+					"""))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.ok").value(false))
+			.andExpect(jsonPath("$.error").value("notFinished"))
+			.andExpect(jsonPath("$.room").doesNotExist());
+	}
+
 	private OnlineRoom sampleWaitingRoom() {
 		return new OnlineRoom(
 			"ABC123",
@@ -236,6 +273,31 @@ class OnlineRoomControllerTest {
 		);
 	}
 
+	private OnlineRoom sampleFinishedRoom(boolean whiteRequestedRematch, boolean blackRequestedRematch) {
+		return new OnlineRoom(
+			"ABC123",
+			OnlineRoomStatus.FINISHED,
+			new OnlineRoomPlayer("player_host", OnlineRoomSide.WHITE, OnlinePlayerPresence.CONNECTED, NOW),
+			new OnlineRoomPlayer("player_guest", OnlineRoomSide.BLACK, OnlinePlayerPresence.CONNECTED, NOW),
+			defaultTimeControl(),
+			300_000L,
+			0L,
+			null,
+			null,
+			OnlineRoomSide.WHITE,
+			whiteRequestedRematch,
+			blackRequestedRematch,
+			List.of(new OnlineMoveRecord(
+				new Move(59, 31, null, null, null, null),
+				OnlineRoomSide.BLACK,
+				NOW
+			)),
+			NOW,
+			NOW,
+			NOW
+		);
+	}
+
 	private TimeControl defaultTimeControl() {
 		return new TimeControl(
 			new SideTimeControl(5, 0),
@@ -250,6 +312,7 @@ class OnlineRoomControllerTest {
 		private JoinOnlineRoomResponse joinRoomResponse;
 		private GetOnlineRoomResponse getRoomResponse;
 		private SubmitOnlineMoveResponse submitMoveResponse;
+		private RequestOnlineRematchResponse requestOnlineRematchResponse;
 
 		@Override
 		public CreateOnlineRoomResponse createRoom(CreateOnlineRoomRequest request) {
@@ -270,6 +333,11 @@ class OnlineRoomControllerTest {
 		@Override
 		public SubmitOnlineMoveResponse submitMove(String rawCode, SubmitOnlineMoveRequest request) {
 			return submitMoveResponse;
+		}
+
+		@Override
+		public RequestOnlineRematchResponse requestRematch(String rawCode, RequestOnlineRematchRequest request) {
+			return requestOnlineRematchResponse;
 		}
 	}
 }

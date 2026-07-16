@@ -17,6 +17,8 @@ import com.angularchess.backend.online.dto.CreateOnlineRoomRequest;
 import com.angularchess.backend.online.dto.CreateOnlineRoomResponse;
 import com.angularchess.backend.online.dto.GetOnlineRoomResponse;
 import com.angularchess.backend.online.dto.JoinOnlineRoomResponse;
+import com.angularchess.backend.online.dto.RequestOnlineRematchRequest;
+import com.angularchess.backend.online.dto.RequestOnlineRematchResponse;
 import com.angularchess.backend.online.dto.SubmitOnlineMoveRequest;
 import com.angularchess.backend.online.dto.SubmitOnlineMoveResponse;
 import com.angularchess.backend.online.model.HostSidePreference;
@@ -29,6 +31,7 @@ import com.angularchess.backend.online.model.OnlineRoomPlayer;
 import com.angularchess.backend.online.model.OnlineRoomSession;
 import com.angularchess.backend.online.model.OnlineRoomSide;
 import com.angularchess.backend.online.model.OnlineRoomStatus;
+import com.angularchess.backend.online.model.RequestOnlineRematchError;
 import com.angularchess.backend.online.model.SideTimeControl;
 import com.angularchess.backend.online.model.SubmitOnlineMoveError;
 import com.angularchess.backend.online.repository.OnlineRoomRepository;
@@ -226,6 +229,55 @@ public class InMemoryOnlineRoomService implements OnlineRoomService {
 		return SubmitOnlineMoveResponse.success(updatedRoom);
 	}
 
+	@Override
+	public synchronized RequestOnlineRematchResponse requestRematch(String rawCode, RequestOnlineRematchRequest request) {
+		String code = roomCodeService.normalizeCode(rawCode);
+		OnlineRoom room = roomRepository.findByCode(code).orElse(null);
+		if (room == null) {
+			return RequestOnlineRematchResponse.failure(RequestOnlineRematchError.NOT_FOUND);
+		}
+
+		OnlineRoomPlayer player = findPlayer(room, request.playerId());
+		if (player == null) {
+			return RequestOnlineRematchResponse.failure(RequestOnlineRematchError.NOT_PARTICIPANT);
+		}
+
+		if (room.status() != OnlineRoomStatus.FINISHED) {
+			return RequestOnlineRematchResponse.failure(RequestOnlineRematchError.NOT_FINISHED);
+		}
+
+		boolean whiteRequestedRematch = room.whiteRequestedRematch() || player.side() == OnlineRoomSide.WHITE;
+		boolean blackRequestedRematch = room.blackRequestedRematch() || player.side() == OnlineRoomSide.BLACK;
+
+		OnlineRoom updatedRoom = whiteRequestedRematch && blackRequestedRematch
+			? resetRoomForRematch(room)
+			: new OnlineRoom(
+				room.code(),
+				room.status(),
+				room.whitePlayer(),
+				room.blackPlayer(),
+				room.timeControlSettings(),
+				room.whiteTimeMs(),
+				room.blackTimeMs(),
+				room.activeClockColor(),
+				room.clockUpdatedAt(),
+				room.timeoutWinner(),
+				whiteRequestedRematch,
+				blackRequestedRematch,
+				room.moves(),
+				room.createdAt(),
+				room.startedAt(),
+				room.finishedAt()
+			);
+
+		if (!updatedRoom.equals(room)) {
+			roomRepository.save(updatedRoom);
+			roomTopicPublisher.publishRoomUpdate(updatedRoom);
+		}
+
+		return RequestOnlineRematchResponse.success(updatedRoom);
+	}
+
 	private String generateUniqueRoomCode() {
 		for (int attempt = 0; attempt < MAX_CODE_GENERATION_ATTEMPTS; attempt++) {
 			String code = roomCodeService.generateCode();
@@ -319,6 +371,39 @@ public class InMemoryOnlineRoomService implements OnlineRoomService {
 			builder.append(PLAYER_ID_ALPHABET.charAt(randomIndex));
 		}
 		return builder.toString();
+	}
+
+	private OnlineRoom resetRoomForRematch(OnlineRoom room) {
+		return new OnlineRoom(
+			room.code(),
+			OnlineRoomStatus.READY,
+			swapPlayerSide(room.blackPlayer(), OnlineRoomSide.WHITE),
+			swapPlayerSide(room.whitePlayer(), OnlineRoomSide.BLACK),
+			room.timeControlSettings(),
+			initialTimeMs(room.timeControlSettings().white()),
+			initialTimeMs(room.timeControlSettings().black()),
+			null,
+			null,
+			null,
+			false,
+			false,
+			List.of(),
+			room.createdAt(),
+			null,
+			null
+		);
+	}
+
+	private OnlineRoomPlayer swapPlayerSide(OnlineRoomPlayer player, OnlineRoomSide nextSide) {
+		if (player == null) {
+			return null;
+		}
+		return new OnlineRoomPlayer(
+			player.id(),
+			nextSide,
+			player.presence(),
+			player.joinedAt()
+		);
 	}
 
 	private OnlineRoom materializeRoomState(OnlineRoom room, long now) {

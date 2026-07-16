@@ -13,6 +13,8 @@ import com.angularchess.backend.online.dto.CreateOnlineRoomResponse;
 import com.angularchess.backend.online.dto.GetOnlineRoomResponse;
 import com.angularchess.backend.online.dto.JoinOnlineRoomRequest;
 import com.angularchess.backend.online.dto.JoinOnlineRoomResponse;
+import com.angularchess.backend.online.dto.RequestOnlineRematchRequest;
+import com.angularchess.backend.online.dto.RequestOnlineRematchResponse;
 import com.angularchess.backend.online.dto.SubmitOnlineMoveRequest;
 import com.angularchess.backend.online.dto.SubmitOnlineMoveResponse;
 import com.angularchess.backend.online.service.OnlineRoomService;
@@ -54,5 +56,13 @@ public class OnlineRoomController {
 		@Valid @RequestBody SubmitOnlineMoveRequest request
 	) {
 		return onlineRoomService.submitMove(code, request);
+	}
+
+	@PostMapping("/{code}/rematch")
+	public RequestOnlineRematchResponse requestRematch(
+		@PathVariable String code,
+		@Valid @RequestBody RequestOnlineRematchRequest request
+	) {
+		return onlineRoomService.requestRematch(code, request);
 	}
 }

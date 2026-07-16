@@ -16,6 +16,8 @@ import org.junit.jupiter.api.Test;
 import com.angularchess.backend.online.dto.CreateOnlineRoomRequest;
 import com.angularchess.backend.online.dto.CreateOnlineRoomResponse;
 import com.angularchess.backend.online.dto.JoinOnlineRoomResponse;
+import com.angularchess.backend.online.dto.RequestOnlineRematchRequest;
+import com.angularchess.backend.online.dto.RequestOnlineRematchResponse;
 import com.angularchess.backend.online.dto.SubmitOnlineMoveRequest;
 import com.angularchess.backend.online.dto.SubmitOnlineMoveResponse;
 import com.angularchess.backend.online.model.HostSidePreference;
@@ -24,6 +26,7 @@ import com.angularchess.backend.online.model.OnlineGameSettings;
 import com.angularchess.backend.online.model.OnlineRoom;
 import com.angularchess.backend.online.model.OnlineRoomSide;
 import com.angularchess.backend.online.model.OnlineRoomStatus;
+import com.angularchess.backend.online.model.RequestOnlineRematchError;
 import com.angularchess.backend.online.model.SideTimeControl;
 import com.angularchess.backend.online.model.SubmitOnlineMoveError;
 import com.angularchess.backend.online.model.TimeControl;
@@ -252,6 +255,69 @@ class InMemoryOnlineRoomServiceTest {
 		assertEquals(0L, roomTopicPublisher.lastPublishedRoom.blackTimeMs());
 	}
 
+	@Test
+	void requestRematchRejectsWhenRoomIsNotFinished() {
+		CreateOnlineRoomResponse createdRoom = service.createRoom(createRoomRequest(HostSidePreference.WHITE));
+		service.joinRoom(createdRoom.room().code());
+
+		RequestOnlineRematchResponse response = service.requestRematch(
+			createdRoom.room().code(),
+			new RequestOnlineRematchRequest(createdRoom.session().playerId())
+		);
+
+		assertFalse(response.ok());
+		assertEquals(RequestOnlineRematchError.NOT_FINISHED, response.error());
+	}
+
+	@Test
+	void requestRematchMarksThePlayerRequestAndPublishesRoomUpdate() {
+		CreateOnlineRoomResponse createdRoom = service.createRoom(createRoomRequest(HostSidePreference.WHITE));
+		JoinOnlineRoomResponse joinedRoom = service.joinRoom(createdRoom.room().code());
+		finishRoomWithFoolsMate(createdRoom, joinedRoom);
+
+		RequestOnlineRematchResponse response = service.requestRematch(
+			createdRoom.room().code(),
+			new RequestOnlineRematchRequest(createdRoom.session().playerId())
+		);
+
+		assertTrue(response.ok());
+		assertTrue(response.room().whiteRequestedRematch());
+		assertFalse(response.room().blackRequestedRematch());
+		assertEquals(7, roomTopicPublisher.publishCount);
+		assertEquals(response.room(), roomTopicPublisher.lastPublishedRoom);
+	}
+
+	@Test
+	void requestRematchResetsTheRoomAndSwapsSidesWhenBothPlayersAccept() {
+		CreateOnlineRoomResponse createdRoom = service.createRoom(createRoomRequest(HostSidePreference.WHITE));
+		JoinOnlineRoomResponse joinedRoom = service.joinRoom(createdRoom.room().code());
+		finishRoomWithFoolsMate(createdRoom, joinedRoom);
+
+		assertTrue(service.requestRematch(
+			createdRoom.room().code(),
+			new RequestOnlineRematchRequest(createdRoom.session().playerId())
+		).ok());
+
+		RequestOnlineRematchResponse response = service.requestRematch(
+			createdRoom.room().code(),
+			new RequestOnlineRematchRequest(joinedRoom.session().playerId())
+		);
+
+		assertTrue(response.ok());
+		assertEquals(OnlineRoomStatus.READY, response.room().status());
+		assertEquals(joinedRoom.session().playerId(), response.room().whitePlayer().id());
+		assertEquals(createdRoom.session().playerId(), response.room().blackPlayer().id());
+		assertEquals(OnlineRoomSide.WHITE, response.room().whitePlayer().side());
+		assertEquals(OnlineRoomSide.BLACK, response.room().blackPlayer().side());
+		assertTrue(response.room().moves().isEmpty());
+		assertFalse(response.room().whiteRequestedRematch());
+		assertFalse(response.room().blackRequestedRematch());
+		assertEquals(300_000L, response.room().whiteTimeMs());
+		assertEquals(300_000L, response.room().blackTimeMs());
+		assertNull(response.room().startedAt());
+		assertNull(response.room().finishedAt());
+	}
+
 	private CreateOnlineRoomRequest createRoomRequest(HostSidePreference hostSidePreference) {
 		return new CreateOnlineRoomRequest(
 			new OnlineGameSettings(
@@ -262,6 +328,25 @@ class InMemoryOnlineRoomServiceTest {
 				hostSidePreference
 			)
 		);
+	}
+
+	private void finishRoomWithFoolsMate(CreateOnlineRoomResponse createdRoom, JoinOnlineRoomResponse joinedRoom) {
+		assertTrue(service.submitMove(
+			createdRoom.room().code(),
+			new SubmitOnlineMoveRequest(createdRoom.session().playerId(), new Move(13, 21, null, null, null, null))
+		).ok());
+		assertTrue(service.submitMove(
+			createdRoom.room().code(),
+			new SubmitOnlineMoveRequest(joinedRoom.session().playerId(), new Move(52, 36, null, null, null, true))
+		).ok());
+		assertTrue(service.submitMove(
+			createdRoom.room().code(),
+			new SubmitOnlineMoveRequest(createdRoom.session().playerId(), new Move(14, 30, null, null, null, true))
+		).ok());
+		assertTrue(service.submitMove(
+			createdRoom.room().code(),
+			new SubmitOnlineMoveRequest(joinedRoom.session().playerId(), new Move(59, 31, null, null, null, null))
+		).ok());
 	}
 
 	private static final class RecordingRoomTopicPublisher implements OnlineRoomTopicPublisher {
