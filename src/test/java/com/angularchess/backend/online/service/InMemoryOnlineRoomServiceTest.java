@@ -9,6 +9,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -318,6 +320,68 @@ class InMemoryOnlineRoomServiceTest {
 		assertNull(response.room().finishedAt());
 	}
 
+	@Test
+	void rematchFlowPublishesPendingAndResetSnapshotsAndStartsANewGameWithSwappedSides() {
+		CreateOnlineRoomResponse createdRoom = service.createRoom(createRoomRequest(HostSidePreference.WHITE));
+		JoinOnlineRoomResponse joinedRoom = service.joinRoom(createdRoom.room().code());
+		finishRoomWithFoolsMate(createdRoom, joinedRoom);
+
+		RequestOnlineRematchResponse firstRequest = service.requestRematch(
+			createdRoom.room().code(),
+			new RequestOnlineRematchRequest(createdRoom.session().playerId())
+		);
+
+		assertTrue(firstRequest.ok());
+		assertEquals(7, roomTopicPublisher.publishCount);
+		OnlineRoom pendingRematchRoom = roomTopicPublisher.publishedRooms.get(6);
+		assertEquals(OnlineRoomStatus.FINISHED, pendingRematchRoom.status());
+		assertTrue(pendingRematchRoom.whiteRequestedRematch());
+		assertFalse(pendingRematchRoom.blackRequestedRematch());
+		assertEquals(4, pendingRematchRoom.moves().size());
+		assertNotNull(pendingRematchRoom.finishedAt());
+
+		RequestOnlineRematchResponse secondRequest = service.requestRematch(
+			createdRoom.room().code(),
+			new RequestOnlineRematchRequest(joinedRoom.session().playerId())
+		);
+
+		assertTrue(secondRequest.ok());
+		assertEquals(8, roomTopicPublisher.publishCount);
+		OnlineRoom resetRoom = roomTopicPublisher.publishedRooms.get(7);
+		assertEquals(secondRequest.room(), resetRoom);
+		assertEquals(OnlineRoomStatus.READY, resetRoom.status());
+		assertEquals(joinedRoom.session().playerId(), resetRoom.whitePlayer().id());
+		assertEquals(createdRoom.session().playerId(), resetRoom.blackPlayer().id());
+		assertEquals(OnlineRoomSide.WHITE, resetRoom.whitePlayer().side());
+		assertEquals(OnlineRoomSide.BLACK, resetRoom.blackPlayer().side());
+		assertNull(resetRoom.timeoutWinner());
+		assertNull(resetRoom.activeClockColor());
+		assertNull(resetRoom.clockUpdatedAt());
+		assertFalse(resetRoom.whiteRequestedRematch());
+		assertFalse(resetRoom.blackRequestedRematch());
+		assertTrue(resetRoom.moves().isEmpty());
+		assertNull(resetRoom.startedAt());
+		assertNull(resetRoom.finishedAt());
+		assertEquals(300_000L, resetRoom.whiteTimeMs());
+		assertEquals(300_000L, resetRoom.blackTimeMs());
+
+		SubmitOnlineMoveResponse restartedGameMove = service.submitMove(
+			createdRoom.room().code(),
+			new SubmitOnlineMoveRequest(joinedRoom.session().playerId(), new Move(12, 28, null, null, null, null))
+		);
+
+		assertTrue(restartedGameMove.ok());
+		assertEquals(OnlineRoomStatus.PLAYING, restartedGameMove.room().status());
+		assertEquals(1, restartedGameMove.room().moves().size());
+		assertEquals(OnlineRoomSide.WHITE, restartedGameMove.room().moves().getFirst().playedBy());
+		assertEquals(joinedRoom.session().playerId(), restartedGameMove.room().whitePlayer().id());
+		assertEquals(createdRoom.session().playerId(), restartedGameMove.room().blackPlayer().id());
+		assertEquals(NOW, restartedGameMove.room().startedAt());
+		assertNull(restartedGameMove.room().finishedAt());
+		assertEquals(9, roomTopicPublisher.publishCount);
+		assertEquals(restartedGameMove.room(), roomTopicPublisher.lastPublishedRoom);
+	}
+
 	private CreateOnlineRoomRequest createRoomRequest(HostSidePreference hostSidePreference) {
 		return new CreateOnlineRoomRequest(
 			new OnlineGameSettings(
@@ -353,11 +417,13 @@ class InMemoryOnlineRoomServiceTest {
 
 		private int publishCount;
 		private OnlineRoom lastPublishedRoom;
+		private final List<OnlineRoom> publishedRooms = new ArrayList<>();
 
 		@Override
 		public void publishRoomUpdate(OnlineRoom room) {
 			publishCount++;
 			lastPublishedRoom = room;
+			publishedRooms.add(room);
 		}
 	}
 
